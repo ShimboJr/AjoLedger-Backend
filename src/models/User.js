@@ -6,8 +6,6 @@ const trustSchema = new Schema(
   {
     slug: {
       type: String,
-      // NOTE: index/unique/sparse are declared on userSchema below — not here,
-      // to avoid Mongoose emitting a "Duplicate schema index" warning.
       lowercase: true,
     },
     isPublic: {
