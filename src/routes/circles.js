@@ -12,6 +12,8 @@ import {
   handleUpdatePayoutOrder,
   handleStartCircle,
 } from '../controllers/circleController.js';
+import { handleContribute }              from '../controllers/paymentController.js';
+import { handleListLedger, handleVerifyLedger } from '../controllers/ledgerController.js';
 
 const router = Router();
 
@@ -26,6 +28,11 @@ router.post('/join/:code', requireAuth, handleJoinCircle);
 
 router.get('/:id', requireAuth, handleGetCircle);
 router.patch('/:id/payout-order', requireAuth, validate(payoutOrderSchema), handleUpdatePayoutOrder);
-router.post('/:id/start', requireAuth, handleStartCircle);
+router.post('/:id/start',         requireAuth, handleStartCircle);
+router.post('/:id/contribute',    requireAuth, handleContribute);
+
+// NOTE: /ledger/verify MUST be declared before /ledger to avoid :id matching "verify"
+router.get('/:id/ledger/verify', requireAuth, handleVerifyLedger);
+router.get('/:id/ledger',        requireAuth, handleListLedger);
 
 export default router;

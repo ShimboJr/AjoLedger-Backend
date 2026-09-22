@@ -10,6 +10,8 @@ import { errorHandler } from './middleware/error.js';
 import authRouter    from './routes/auth.js';
 import healthRouter  from './routes/health.js';
 import circlesRouter from './routes/circles.js';
+import paymentsRouter from './routes/payments.js';
+import webhookRouter from './routes/webhook.js';
 
 const app = express();
 
@@ -43,26 +45,22 @@ if (env.NODE_ENV !== 'test') {
   );
 }
 
-// ── RAW BODY — webhook route must be mounted HERE, before JSON parser ─────────
-// Day 3: import and mount paystackWebhookRouter here (needs express.raw body).
-// Example:
-//   import webhookRouter from './routes/webhook.js';
-//   app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRouter);
-// ─────────────────────────────────────────────────────────────────────────────
+// ── RAW BODY — webhook MUST be mounted BEFORE express.json ───────────────────
+// express.raw() preserves the Buffer so HMAC-SHA512 can be computed for signature verification.
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRouter);
 
 // ── JSON body parser — 100kb limit ───────────────────────────────────────────
 app.use(express.json({ limit: '100kb' }));
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use('/api/health',   healthRouter);
-app.use('/api/auth',     authRouter);
-app.use('/api/circles',  circlesRouter);
+app.use('/api/health',    healthRouter);
+app.use('/api/auth',      authRouter);
+app.use('/api/circles',   circlesRouter);
+app.use('/api/payments',  paymentsRouter);
 
-// Day 3+: additional routers (payments, trust, notifications, jobs)
-// app.use('/api/payments',      paymentsRouter);
+// Day 4+: trust, notifications, jobs routers
 // app.use('/api/me',            meRouter);
 // app.use('/api/notifications', notificationsRouter);
-// app.use('/api/public',        publicRouter);
 // app.use('/api/jobs',          jobsRouter);
 
 
