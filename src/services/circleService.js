@@ -1,13 +1,14 @@
 import mongoose from 'mongoose';
-import { Circle } from '../models/Circle.js';
+import { Circle }     from '../models/Circle.js';
 import { Membership } from '../models/Membership.js';
-import { Cycle } from '../models/Cycle.js';
+import { Cycle }      from '../models/Cycle.js';
 import { Obligation } from '../models/Obligation.js';
-import { User } from '../models/User.js';
+import { User }       from '../models/User.js';
 import { generateInviteCode } from '../utils/ids.js';
 import { addDays, addPeriods } from '../utils/dates.js';
-import { createError } from '../middleware/error.js';
-import { env } from '../config/env.js';
+import { createError }        from '../middleware/error.js';
+import { env }                from '../config/env.js';
+import { computeTrust }       from './trust.js';
 
 // ── Create Circle ────────────────────────────────────────────────────────────
 
@@ -212,15 +213,43 @@ export async function getCircleDetail(circleId, userId) {
   const circleData = { ...circle };
   if (!isOrganizer) delete circleData.inviteCode;
 
+  // ── Per-member trust scores ───────────────────────────────────────────────
+  const membersWithTrust = await Promise.all(
+    members.map(async (m) => {
+      const trust = await computeTrust(m.user._id ?? m.user);
+      return { ...m, trust: { score: trust.score, tier: trust.tier } };
+    })
+  );
+
+  // ── Last closed cycle summary (for "Last cycle" card) ─────────────────────
+  let lastClosedCycle = null;
+  if (circle.status === 'active' && circle.currentCycleNumber > 1) {
+    const lcc = await Cycle.findOne({
+      circle: circleId,
+      status: 'closed',
+      number: circle.currentCycleNumber - 1,
+    })
+      .populate('recipient', 'name')
+      .lean();
+
+    if (lcc) {
+      const missedObs = await Obligation.find({ cycle: lcc._id, status: 'missed' })
+        .populate('user', 'name')
+        .lean();
+      lastClosedCycle = { ...lcc, missedMembers: missedObs.map((o) => o.user) };
+    }
+  }
+
   return {
     circle: circleData,
-    members,
+    members: membersWithTrust,
     currentCycle,
     myObligation,
     obligations,
     myRole: myMembership.role,
     myPosition: myMembership.position,
     isOrganizer,
+    lastClosedCycle,
   };
 }
 

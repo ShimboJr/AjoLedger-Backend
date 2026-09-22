@@ -8,7 +8,12 @@ import {
   updatePayoutOrder,
   startCircle,
 } from '../services/circleService.js';
-import { env } from '../config/env.js';
+import { Circle }       from '../models/Circle.js';
+import { Cycle }        from '../models/Cycle.js';
+import { runEngine }    from '../services/engine.js';
+import { runReminders } from '../services/reminders.js';
+import { createError }  from '../middleware/error.js';
+import { env }          from '../config/env.js';
 
 // ── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -97,5 +102,70 @@ export async function handleStartCircle(req, res, next) {
   try {
     const circle = await startCircle(req.params.id, req.user._id);
     return res.json({ data: { circle } });
+  } catch (err) { next(err); }
+}
+
+// ── Demo simulate ────────────────────────────────────────────────────────────
+
+/**
+ * handleSimulate — POST /api/circles/:id/simulate
+ * Only available when DEMO_MODE=true and caller is the organizer.
+ *
+ * Actions:
+ *   'pass-due-date' — set simulatedNow = openCycle.dueDate + 1h,
+ *                     run runReminders (overdue fires) then runEngine.
+ *   'close-cycle'   — set simulatedNow = openCycle.closesAt + 1min,
+ *                     run runEngine (cycle closes) then runReminders.
+ */
+export async function handleSimulate(req, res, next) {
+  try {
+    if (!env.DEMO_MODE) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
+    }
+
+    const circleId = req.params.id;
+    const { action } = req.body ?? {};
+
+    if (!['pass-due-date', 'close-cycle'].includes(action)) {
+      throw createError(400, 'BAD_REQUEST', 'action must be "pass-due-date" or "close-cycle"');
+    }
+
+    const circle = await Circle.findById(circleId).lean();
+    if (!circle) throw createError(404, 'NOT_FOUND', 'Circle not found');
+    if (String(circle.organizer) !== String(req.user._id)) {
+      throw createError(403, 'FORBIDDEN', 'Only the organizer can use demo controls');
+    }
+    if (circle.status !== 'active') {
+      throw createError(400, 'BAD_REQUEST', 'Circle must be active to use demo controls');
+    }
+
+    const openCycle = await Cycle.findOne({ circle: circleId, status: 'open' }).lean();
+    if (!openCycle) throw createError(400, 'BAD_REQUEST', 'No open cycle found');
+
+    let simulatedNow;
+    if (action === 'pass-due-date') {
+      // Move clock to 1 hour after dueDate — overdue reminders fire, no close yet
+      simulatedNow = new Date(new Date(openCycle.dueDate).getTime() + 60 * 60 * 1000);
+    } else {
+      // Move clock to 1 minute after closesAt — engine will close the cycle
+      simulatedNow = new Date(new Date(openCycle.closesAt).getTime() + 60 * 1000);
+    }
+
+    // Persist simulatedNow on the circle
+    await Circle.updateOne({ _id: circleId }, { $set: { simulatedNow } });
+
+    let engineSummary, reminderSummary;
+
+    if (action === 'pass-due-date') {
+      // Reminders first (so overdue classification fires), engine second
+      reminderSummary = await runReminders({ circleId });
+      engineSummary   = await runEngine({ circleId });
+    } else {
+      // Engine first (closes cycle, creates notifications), reminders sends emails
+      engineSummary   = await runEngine({ circleId });
+      reminderSummary = await runReminders({ circleId });
+    }
+
+    res.json({ data: { action, simulatedNow, engineSummary, reminderSummary } });
   } catch (err) { next(err); }
 }

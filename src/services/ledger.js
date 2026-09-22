@@ -61,26 +61,25 @@ export async function appendLedgerEntry(session, data) {
   });
 
   // create([ doc ], { session }) is the Mongoose pattern for transactional inserts.
-  const [entry] = await LedgerEntry.create(
-    [
-      {
-        seq,               // ← required; must be explicit (not in `data`)
-        circle:      data.circle,
-        cycle:       data.cycle,
-        cycleNumber: data.cycleNumber,
-        type:        data.type,
-        user:        data.user,
-        amountKobo:  data.amountKobo,
-        reference:   data.reference ?? null,
-        sandbox:     true,
-        meta:        data.meta ?? {},
-        prevHash,
-        hash,
-        createdAt,
-      },
-    ],
-    { session }
-  );
+  // IMPORTANT: omit 'reference' entirely (not null) when absent — the sparse unique
+  // index on reference_1 treats null as a present value and conflicts on multiple nulls.
+  const docFields = {
+    seq,
+    circle:      data.circle,
+    cycle:       data.cycle,
+    cycleNumber: data.cycleNumber,
+    type:        data.type,
+    user:        data.user,
+    amountKobo:  data.amountKobo,
+    sandbox:     true,
+    meta:        data.meta ?? {},
+    prevHash,
+    hash,
+    createdAt,
+  };
+  if (data.reference != null) docFields.reference = data.reference;
+
+  const [entry] = await LedgerEntry.create([docFields], { session });
 
   return entry;
 }

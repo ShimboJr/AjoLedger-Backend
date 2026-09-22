@@ -1,5 +1,6 @@
-import { env } from './config/env.js';
-import { connectDB } from './config/db.js';
+import { env }           from './config/env.js';
+import { connectDB }      from './config/db.js';
+import { startScheduler } from './jobs/scheduler.js';
 
 // Import all models so Mongoose registers them and creates indexes on startup
 import './models/User.js';
@@ -15,6 +16,7 @@ import app from './app.js';
 
 async function start() {
   await connectDB();
+  startScheduler();
 
   app.listen(env.PORT, () => {
     console.log(`[server] AjoLedger API running on port ${env.PORT} (${env.NODE_ENV})`);

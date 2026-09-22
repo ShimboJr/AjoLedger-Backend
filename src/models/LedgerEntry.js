@@ -55,7 +55,9 @@ const ledgerEntrySchema = new Schema(
     },
     reference: {
       type: String,
-      default: null,
+      // No default — omit entirely for entries without a reference (engine/payout/missed).
+      // The sparse unique index only enforces uniqueness on documents where this field EXISTS.
+      // Setting default:null caused every null to collide on the index.
     },
     sandbox: {
       type: Boolean,

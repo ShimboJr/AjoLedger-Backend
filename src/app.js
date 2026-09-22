@@ -7,11 +7,14 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/error.js';
 
 // Route modules
-import authRouter    from './routes/auth.js';
-import healthRouter  from './routes/health.js';
-import circlesRouter from './routes/circles.js';
-import paymentsRouter from './routes/payments.js';
-import webhookRouter from './routes/webhook.js';
+import authRouter          from './routes/auth.js';
+import healthRouter        from './routes/health.js';
+import circlesRouter       from './routes/circles.js';
+import paymentsRouter      from './routes/payments.js';
+import webhookRouter       from './routes/webhook.js';
+import meRouter            from './routes/me.js';
+import notificationsRouter from './routes/notifications.js';
+import jobsRouter          from './routes/jobs.js';
 
 const app = express();
 
@@ -53,15 +56,13 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoute
 app.use(express.json({ limit: '100kb' }));
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use('/api/health',    healthRouter);
-app.use('/api/auth',      authRouter);
-app.use('/api/circles',   circlesRouter);
-app.use('/api/payments',  paymentsRouter);
-
-// Day 4+: trust, notifications, jobs routers
-// app.use('/api/me',            meRouter);
-// app.use('/api/notifications', notificationsRouter);
-// app.use('/api/jobs',          jobsRouter);
+app.use('/api/health',         healthRouter);
+app.use('/api/auth',           authRouter);
+app.use('/api/circles',        circlesRouter);
+app.use('/api/payments',       paymentsRouter);
+app.use('/api/me',             meRouter);
+app.use('/api/notifications',  notificationsRouter);
+app.use('/api/jobs',           jobsRouter);
 
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
