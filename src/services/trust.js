@@ -1,5 +1,5 @@
 /**
- * trust.js — reliability score computation.
+ * trust.js — reliability score computation and trust profile management.
  *
  * scoreFromCounts({ onTime, late, missed }) — pure function.
  *   Weights: on-time=1, late=0.5, missed=0.
@@ -9,12 +9,19 @@
  * computeTrust(userId) — aggregate a user's obligations across all circles.
  *   Returns { score, tier, onTime, late, missed, resolved,
  *             circlesJoined, circlesCompleted, memberSince }
+ *
+ * getTrustProfile(userId) — extends computeTrust with { slug, isPublic, publicUrl }.
+ *   Lazy-backfills the slug if the user has none.
+ *
+ * updateTrustSettings(userId, { isPublic?, regenerateSlug? }) — PATCH handler.
  */
 
 import { Obligation } from '../models/Obligation.js';
 import { Membership } from '../models/Membership.js';
 import { Circle }     from '../models/Circle.js';
 import { User }       from '../models/User.js';
+import { generateTrustSlug } from '../utils/ids.js';
+import { env }        from '../config/env.js';
 
 const MIN_RESOLVED = 3;
 
@@ -45,7 +52,7 @@ export function scoreFromCounts({ onTime, late, missed }) {
   return { score, tier, resolved };
 }
 
-// ── Tier display helpers (also used by the API response) ─────────────────────
+// ── Tier display helpers ──────────────────────────────────────────────────────
 
 export const TIER_LABELS = {
   excellent: 'Exceptional — always pays on time',
@@ -54,6 +61,38 @@ export const TIER_LABELS = {
   poor:      'Needs improvement',
   building:  'Building your history',
 };
+
+// ── Slug helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * ensureSlug(userId) — lazy-backfill. Generates + saves a slug if the user
+ * has none. Returns the slug (existing or new).
+ *
+ * @param {string|import('mongoose').Types.ObjectId} userId
+ * @returns {Promise<string>}
+ */
+export async function ensureSlug(userId) {
+  const user = await User.findById(userId).select('trust').lean();
+  if (user?.trust?.slug) return user.trust.slug;
+
+  // Try up to 5 times in case of a duplicate (birthday-problem unlikely at this scale)
+  for (let i = 0; i < 5; i++) {
+    const slug = generateTrustSlug();
+    try {
+      await User.updateOne(
+        { _id: userId, 'trust.slug': { $exists: false } },
+        { $set: { 'trust.slug': slug } }
+      );
+      // Re-fetch to get the actual saved slug (in case of concurrent update)
+      const fresh = await User.findById(userId).select('trust').lean();
+      return fresh?.trust?.slug ?? slug;
+    } catch (err) {
+      if (err.code === 11000) continue; // Slug collision — retry
+      throw err;
+    }
+  }
+  throw new Error('Failed to generate a unique trust slug');
+}
 
 // ── computeTrust ──────────────────────────────────────────────────────────────
 
@@ -101,5 +140,77 @@ export async function computeTrust(userId) {
     circlesJoined,
     circlesCompleted,
     memberSince: user?.createdAt ?? null,
+  };
+}
+
+// ── getTrustProfile ───────────────────────────────────────────────────────────
+
+/**
+ * getTrustProfile(userId) — full profile including slug + public settings.
+ * Lazy-backfills the slug if missing.
+ *
+ * @param {string|import('mongoose').Types.ObjectId} userId
+ */
+export async function getTrustProfile(userId) {
+  const [trust, user, slug] = await Promise.all([
+    computeTrust(userId),
+    User.findById(userId).select('trust').lean(),
+    ensureSlug(userId),
+  ]);
+
+  const isPublic  = user?.trust?.isPublic ?? false;
+  const publicUrl = `${env.CLIENT_URL}/t/${slug}`;
+
+  return {
+    ...trust,
+    slug,
+    isPublic,
+    publicUrl,
+  };
+}
+
+// ── updateTrustSettings ───────────────────────────────────────────────────────
+
+/**
+ * updateTrustSettings(userId, { isPublic?, regenerateSlug? })
+ *
+ * @param {string|import('mongoose').Types.ObjectId} userId
+ * @param {{ isPublic?: boolean, regenerateSlug?: boolean }} opts
+ * @returns {Promise<{ slug: string, isPublic: boolean, publicUrl: string }>}
+ */
+export async function updateTrustSettings(userId, { isPublic, regenerateSlug } = {}) {
+  const update = {};
+
+  if (typeof isPublic === 'boolean') {
+    update['trust.isPublic'] = isPublic;
+  }
+
+  if (regenerateSlug) {
+    // Generate new slug — old link is immediately invalidated
+    for (let i = 0; i < 5; i++) {
+      const newSlug = generateTrustSlug();
+      try {
+        await User.updateOne({ _id: userId }, { $set: { 'trust.slug': newSlug, ...update } });
+        const publicUrl = `${env.CLIENT_URL}/t/${newSlug}`;
+        const fresh = await User.findById(userId).select('trust').lean();
+        return { slug: newSlug, isPublic: fresh?.trust?.isPublic ?? false, publicUrl };
+      } catch (err) {
+        if (err.code === 11000) continue;
+        throw err;
+      }
+    }
+    throw new Error('Failed to generate a unique trust slug');
+  }
+
+  if (Object.keys(update).length > 0) {
+    await User.updateOne({ _id: userId }, { $set: update });
+  }
+
+  const fresh = await User.findById(userId).select('trust').lean();
+  const slug  = await ensureSlug(userId);
+  return {
+    slug,
+    isPublic:  fresh?.trust?.isPublic ?? false,
+    publicUrl: `${env.CLIENT_URL}/t/${slug}`,
   };
 }

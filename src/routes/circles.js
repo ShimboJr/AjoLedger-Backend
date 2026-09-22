@@ -15,6 +15,9 @@ import {
 } from '../controllers/circleController.js';
 import { handleContribute }              from '../controllers/paymentController.js';
 import { handleListLedger, handleVerifyLedger } from '../controllers/ledgerController.js';
+import { buildLedgerCsv, circleNameToSlug }     from '../services/csv.js';
+import { Membership } from '../models/Membership.js';
+import { Circle }     from '../models/Circle.js';
 
 const router = Router();
 
@@ -36,5 +39,26 @@ router.post('/:id/simulate',      requireAuth, handleSimulate);
 // NOTE: /ledger/verify MUST be declared before /ledger to avoid :id matching "verify"
 router.get('/:id/ledger/verify', requireAuth, handleVerifyLedger);
 router.get('/:id/ledger',        requireAuth, handleListLedger);
+
+// CSV download — members only
+router.get('/:id/ledger.csv', requireAuth, async (req, res, next) => {
+  try {
+    const membership = await Membership.findOne({ circle: req.params.id, user: req.user._id }).lean();
+    if (!membership) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Circle not found' } });
+
+    const circle = await Circle.findById(req.params.id).lean();
+    const csv    = await buildLedgerCsv(req.params.id);
+    const slug   = circleNameToSlug(circle?.name ?? 'circle');
+    const date   = new Date().toISOString().slice(0, 10);
+    const filename = `ledger-${slug}-${date}.csv`;
+
+    res
+      .set('Content-Type', 'text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="${filename}"`)
+      .send(csv);
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;

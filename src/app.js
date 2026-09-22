@@ -15,13 +15,17 @@ import webhookRouter       from './routes/webhook.js';
 import meRouter            from './routes/me.js';
 import notificationsRouter from './routes/notifications.js';
 import jobsRouter          from './routes/jobs.js';
+import publicRouter        from './routes/public.js';
 
 const app = express();
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet());
 
-// ── CORS — allowlist only CLIENT_URL ─────────────────────────────────────────
+// ── CORS — public routes: any origin; private routes: CLIENT_URL only ─────────
+// /api/public/trust/:slug is shared as a link — must work from anywhere.
+app.use('/api/public', cors({ origin: '*', methods: ['GET', 'OPTIONS'] }));
+
 app.use(
   cors({
     origin: env.CLIENT_URL,
@@ -63,6 +67,7 @@ app.use('/api/payments',       paymentsRouter);
 app.use('/api/me',             meRouter);
 app.use('/api/notifications',  notificationsRouter);
 app.use('/api/jobs',           jobsRouter);
+app.use('/api/public',         publicRouter);
 
 
 // ── 404 handler ───────────────────────────────────────────────────────────────

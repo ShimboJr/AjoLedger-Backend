@@ -10,7 +10,9 @@
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node src/server.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "seed": "node --env-file=.env src/scripts/seed.js",
+    "seed:reset": "node --env-file=.env src/scripts/seed.js reset"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
