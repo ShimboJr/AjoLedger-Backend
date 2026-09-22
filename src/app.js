@@ -7,8 +7,9 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/error.js';
 
 // Route modules
-import authRouter   from './routes/auth.js';
-import healthRouter from './routes/health.js';
+import authRouter    from './routes/auth.js';
+import healthRouter  from './routes/health.js';
+import circlesRouter from './routes/circles.js';
 
 const app = express();
 
@@ -53,16 +54,17 @@ if (env.NODE_ENV !== 'test') {
 app.use(express.json({ limit: '100kb' }));
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use('/api/health', healthRouter);
-app.use('/api/auth',   authRouter);
+app.use('/api/health',   healthRouter);
+app.use('/api/auth',     authRouter);
+app.use('/api/circles',  circlesRouter);
 
-// Day 2+: mount additional routers here
-// app.use('/api/circles',       circlesRouter);
+// Day 3+: additional routers (payments, trust, notifications, jobs)
 // app.use('/api/payments',      paymentsRouter);
 // app.use('/api/me',            meRouter);
 // app.use('/api/notifications', notificationsRouter);
 // app.use('/api/public',        publicRouter);
 // app.use('/api/jobs',          jobsRouter);
+
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {
