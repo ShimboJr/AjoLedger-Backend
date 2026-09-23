@@ -51,4 +51,31 @@ router.post('/read-all', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PATCH /api/notifications/:id/read
+ * Marks a single notification as read (idempotent — safe to call twice).
+ * Only the owning user may mark their own notification.
+ */
+router.patch('/:id/read', requireAuth, async (req, res, next) => {
+  try {
+    const notif = await Notification.findOne({
+      _id:  req.params.id,
+      user: req.user._id,      // ownership check
+    });
+
+    if (!notif) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Notification not found' } });
+    }
+
+    if (!notif.readAt) {
+      notif.readAt = new Date();
+      await notif.save();
+    }
+
+    res.json({ data: { ok: true, notification: notif.toObject() } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
