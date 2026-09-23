@@ -397,3 +397,100 @@ describe('PATCH /api/circles/:id/payout-order', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ── DELETE /api/circles/:id/members/:userId ──────────────────────────────────
+
+describe('DELETE /api/circles/:id/members/:userId', () => {
+  it('organizer removes a member: membership deleted, positions renumbered, invite code rotated', async () => {
+    const app = await getApp();
+    const { token: org } = await registerUser(app);
+    const { token: mem, user: memUser } = await registerUser(app);
+    const { circle } = await makeCircle(app, org, { maxMembers: 5 });
+
+    // Member joins — they are at position 2
+    await supertest(app)
+      .post(`/api/circles/join/${circle.inviteCode}`)
+      .set('Authorization', `Bearer ${mem}`);
+
+    const originalInviteCode = circle.inviteCode;
+
+    const res = await supertest(app)
+      .delete(`/api/circles/${circle._id}/members/${memUser._id}`)
+      .set('Authorization', `Bearer ${org}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.removed).toBe(true);
+    expect(res.body.data.membersRemaining).toBe(1); // only organizer left
+
+    // Verify member is gone from the detail response
+    const detail = await supertest(app)
+      .get(`/api/circles/${circle._id}`)
+      .set('Authorization', `Bearer ${org}`);
+
+    expect(detail.body.data.members).toHaveLength(1);
+    expect(detail.body.data.members[0].position).toBe(1); // positions renumbered
+
+    // Invite code must have been rotated
+    expect(detail.body.data.circle.inviteCode).not.toBe(originalInviteCode);
+  });
+
+  it('non-organizer cannot remove a member → 403', async () => {
+    const app = await getApp();
+    const { token: org } = await registerUser(app);
+    const { token: mem1 } = await registerUser(app);
+    const { token: mem2, user: mem2User } = await registerUser(app);
+    const { circle } = await makeCircle(app, org, { maxMembers: 5 });
+
+    await supertest(app).post(`/api/circles/join/${circle.inviteCode}`).set('Authorization', `Bearer ${mem1}`);
+    await supertest(app).post(`/api/circles/join/${circle.inviteCode}`).set('Authorization', `Bearer ${mem2}`);
+
+    const res = await supertest(app)
+      .delete(`/api/circles/${circle._id}/members/${mem2User._id}`)
+      .set('Authorization', `Bearer ${mem1}`); // not the organizer
+
+    expect(res.status).toBe(403);
+  });
+
+  it('organizer cannot remove themselves → 400', async () => {
+    const app = await getApp();
+    const { token: org, user: orgUser } = await registerUser(app);
+    const { circle } = await makeCircle(app, org);
+
+    const res = await supertest(app)
+      .delete(`/api/circles/${circle._id}/members/${orgUser._id}`)
+      .set('Authorization', `Bearer ${org}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/yourself/i);
+  });
+
+  it('cannot remove a member once circle is active → 400', async () => {
+    const app = await getApp();
+    const { token: org } = await registerUser(app);
+    const { token: mem, user: memUser } = await registerUser(app);
+    const { circle } = await makeCircle(app, org, { maxMembers: 5 });
+
+    await supertest(app).post(`/api/circles/join/${circle.inviteCode}`).set('Authorization', `Bearer ${mem}`);
+    await supertest(app).post(`/api/circles/${circle._id}/start`).set('Authorization', `Bearer ${org}`);
+
+    const res = await supertest(app)
+      .delete(`/api/circles/${circle._id}/members/${memUser._id}`)
+      .set('Authorization', `Bearer ${org}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/forming/i);
+  });
+
+  it('removing a non-member returns 404', async () => {
+    const app = await getApp();
+    const { token: org } = await registerUser(app);
+    const { user: stranger } = await registerUser(app);
+    const { circle } = await makeCircle(app, org);
+
+    const res = await supertest(app)
+      .delete(`/api/circles/${circle._id}/members/${stranger._id}`)
+      .set('Authorization', `Bearer ${org}`);
+
+    expect(res.status).toBe(404);
+  });
+});

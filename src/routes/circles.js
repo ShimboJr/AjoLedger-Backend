@@ -12,6 +12,7 @@ import {
   handleUpdatePayoutOrder,
   handleStartCircle,
   handleSimulate,
+  handleRemoveMember,
 } from '../controllers/circleController.js';
 import { handleContribute }              from '../controllers/paymentController.js';
 import { handleListLedger, handleVerifyLedger } from '../controllers/ledgerController.js';
@@ -34,7 +35,8 @@ router.get('/:id', requireAuth, handleGetCircle);
 router.patch('/:id/payout-order', requireAuth, validate(payoutOrderSchema), handleUpdatePayoutOrder);
 router.post('/:id/start',         requireAuth, handleStartCircle);
 router.post('/:id/contribute',    requireAuth, handleContribute);
-router.post('/:id/simulate',      requireAuth, handleSimulate);
+router.post('/:id/simulate',            requireAuth, handleSimulate);
+router.delete('/:id/members/:userId',   requireAuth, handleRemoveMember);
 
 // NOTE: /ledger/verify MUST be declared before /ledger to avoid :id matching "verify"
 router.get('/:id/ledger/verify', requireAuth, handleVerifyLedger);

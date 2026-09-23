@@ -10,6 +10,7 @@ import {
 } from '../services/circleService.js';
 import { Circle }       from '../models/Circle.js';
 import { Cycle }        from '../models/Cycle.js';
+import { Membership }   from '../models/Membership.js';
 import { runEngine }    from '../services/engine.js';
 import { runReminders } from '../services/reminders.js';
 import { createError }  from '../middleware/error.js';
@@ -203,4 +204,75 @@ export async function handleSimulate(req, res, next) {
     }
     next(err);
   }
+}
+
+// ── Remove member ─────────────────────────────────────────────────────────────
+
+/**
+ * handleRemoveMember — DELETE /api/circles/:id/members/:userId
+ *
+ * Organizer-only. Circle must still be 'forming'.
+ * Cannot remove yourself (the organizer).
+ * After removal:
+ *   1. Remaining memberships are renumbered 1-N (gap-free).
+ *   2. The circle's inviteCode is rotated so the removed member
+ *      cannot simply rejoin with the old link.
+ */
+export async function handleRemoveMember(req, res, next) {
+  try {
+    const { id: circleId, userId: targetUserId } = req.params;
+
+    const circle = await Circle.findById(circleId).lean();
+    if (!circle) throw createError(404, 'NOT_FOUND', 'Circle not found');
+
+    if (String(circle.organizer) !== String(req.user._id)) {
+      throw createError(403, 'FORBIDDEN', 'Only the organizer can remove members');
+    }
+    if (circle.status !== 'forming') {
+      throw createError(400, 'BAD_REQUEST', 'Members can only be removed while the circle is forming');
+    }
+    if (String(targetUserId) === String(req.user._id)) {
+      throw createError(400, 'BAD_REQUEST', 'You cannot remove yourself from the circle');
+    }
+
+    // 404 if not a member — avoids leaking circle existence to non-members
+    const target = await Membership.findOne({ circle: circleId, user: targetUserId }).lean();
+    if (!target) throw createError(404, 'NOT_FOUND', 'Member not found in this circle');
+
+    // Delete the membership
+    await Membership.deleteOne({ _id: target._id });
+
+    // Renumber remaining positions 1-N in current order (gap-free)
+    const remaining = await Membership.find({ circle: circleId })
+      .sort({ position: 1 })
+      .lean();
+
+    await Promise.all(
+      remaining.map((m, idx) =>
+        Membership.updateOne({ _id: m._id }, { $set: { position: idx + 1 } })
+      )
+    );
+
+    // Rotate invite code — the removed member must not be able to rejoin with the old link
+    const { generateInviteCode } = await import('../utils/ids.js');
+    let newInviteCode;
+    for (let i = 0; i < 5; i++) {
+      const candidate = generateInviteCode();
+      const exists = await Circle.findOne({ inviteCode: candidate }).lean();
+      if (!exists) { newInviteCode = candidate; break; }
+    }
+    if (newInviteCode) {
+      await Circle.updateOne({ _id: circleId }, { $set: { inviteCode: newInviteCode } });
+    }
+
+    const newInviteUrl = newInviteCode ? `${env.CLIENT_URL}/join/${newInviteCode}` : undefined;
+
+    return res.json({
+      data: {
+        removed:          true,
+        membersRemaining: remaining.length,
+        ...(newInviteUrl ? { inviteUrl: newInviteUrl } : {}),
+      },
+    });
+  } catch (err) { next(err); }
 }
