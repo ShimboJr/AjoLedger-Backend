@@ -11,7 +11,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
-  JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters for production security'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   CLIENT_URL: z.string().url('CLIENT_URL must be a valid URL'),
   PAYSTACK_SECRET_KEY: z.string().startsWith('sk_', 'PAYSTACK_SECRET_KEY must start with sk_'),
@@ -24,7 +24,7 @@ const envSchema = z.object({
   MAIL_FROM: z.string().email('MAIL_FROM must be a valid email').default('noreply@ajoledger.example.com'),
   REMINDER_DAYS_BEFORE: z.coerce.number().int().nonnegative().default(2),
   ENABLE_CRON: z.enum(['true', 'false']).transform((v) => v === 'true').default('false'),
-  CRON_SECRET: z.string().min(16, 'CRON_SECRET must be at least 16 characters'),
+  CRON_SECRET: z.string().min(32, 'CRON_SECRET must be at least 32 characters for production security'),
   DEMO_MODE: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
 });
 
