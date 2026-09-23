@@ -154,7 +154,7 @@ export async function sendMail({ to, subject, text, html }) {
     return { status: 'sent', messageId: 'console' };
   }
 
-  // SMTP path
+  // SMTP path (nodemailer)
   try {
     const transporter = getTransporter();
     const info = await transporter.sendMail({
