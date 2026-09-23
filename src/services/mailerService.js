@@ -63,6 +63,11 @@ function getTransporter() {
     port,
     secure: port === 465,
     auth:   { user: env.SMTP_USER, pass: env.SMTP_PASS },
+    // Fail fast if SMTP port is blocked (e.g. Render free tier blocks outbound port 587).
+    // Without these, nodemailer hangs for 30-60 s per attempt with no error.
+    connectionTimeout: 5_000,   // ms to wait for TCP connection
+    greetingTimeout:   5_000,   // ms to wait for SMTP EHLO greeting after connect
+    socketTimeout:     10_000,  // ms of inactivity before killing an established socket
   });
   return _transporter;
 }
@@ -161,6 +166,8 @@ export async function sendMail({ to, subject, text, html }) {
     });
     return { status: 'sent', messageId: info.messageId };
   } catch (err) {
+    // Reset singleton so the next call gets a fresh transport (avoids reusing a dead connection)
+    _transporter = null;
     // Log the error but do NOT include SMTP credentials
     console.error(
       `[mailer:smtp] Failed — to: ${to} | subject: ${subject} | error: ${err.message}`
