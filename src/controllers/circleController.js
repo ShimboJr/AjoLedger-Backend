@@ -155,17 +155,52 @@ export async function handleSimulate(req, res, next) {
     await Circle.updateOne({ _id: circleId }, { $set: { simulatedNow } });
 
     let engineSummary, reminderSummary;
+    let reminderError = null;
 
     if (action === 'pass-due-date') {
-      // Reminders first (so overdue classification fires), engine second
-      reminderSummary = await runReminders({ circleId });
-      engineSummary   = await runEngine({ circleId });
+      // Reminders first (so overdue classification fires), engine second.
+      // Wrap reminders independently — email failures must not abort the simulation.
+      try {
+        reminderSummary = await runReminders({ circleId });
+      } catch (err) {
+        console.error('[simulate] runReminders error (non-fatal):', err.message);
+        reminderError   = err.message;
+        reminderSummary = { notificationsCreated: 0, emailsSent: 0 };
+      }
+      engineSummary = await runEngine({ circleId });
     } else {
-      // Engine first (closes cycle, creates notifications), reminders sends emails
-      engineSummary   = await runEngine({ circleId });
-      reminderSummary = await runReminders({ circleId });
+      // Engine first (closes cycle, creates notifications), reminders sends emails.
+      engineSummary = await runEngine({ circleId });
+      try {
+        reminderSummary = await runReminders({ circleId });
+      } catch (err) {
+        console.error('[simulate] runReminders error (non-fatal):', err.message);
+        reminderError   = err.message;
+        reminderSummary = { notificationsCreated: 0, emailsSent: 0 };
+      }
     }
 
-    res.json({ data: { action, simulatedNow, engineSummary, reminderSummary } });
-  } catch (err) { next(err); }
+    res.json({
+      data: {
+        action,
+        simulatedNow,
+        engineSummary,
+        reminderSummary,
+        // Surface reminder errors in response body so organizers can see them
+        ...(reminderError ? { reminderError } : {}),
+      },
+    });
+  } catch (err) {
+    // In DEMO_MODE, always expose the real error message so organizers can diagnose
+    // issues during demos (this endpoint is already gated behind organizer-only auth).
+    if (env.DEMO_MODE && !err.statusCode) {
+      return res.status(500).json({
+        error: {
+          code:    'SIMULATION_ERROR',
+          message: `Simulation failed: ${err.message}`,
+        },
+      });
+    }
+    next(err);
+  }
 }
