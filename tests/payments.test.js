@@ -402,11 +402,15 @@ describe('POST /api/circles/:id/contribute', () => {
       .post(`/api/circles/${circle._id}/contribute`)
       .set('Authorization', `Bearer ${orgToken}`);
 
-    // The organizer already has an initialized payment in the fixture
-    // so handleContribute re-initializes with the existing reference
+    // The organizer already has an 'initialized' payment in the fixture.
+    // handleContribute now marks it 'abandoned' and issues a fresh reference,
+    // because Paystack rejects re-initialization of an already-seen reference.
     expect(res.status).toBe(200);
     expect(res.body.data.authorizationUrl).toBe('https://checkout.paystack.com/test123');
     expect(res.body.data.reference).toBeTruthy();
+    // Confirm the old payment was abandoned
+    const abandoned = await Payment.findOne({ reference: payment.reference }).lean();
+    expect(abandoned.status).toBe('abandoned');
   });
 
   it('non-member cannot contribute', async () => {

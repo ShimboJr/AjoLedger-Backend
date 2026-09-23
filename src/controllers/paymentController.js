@@ -57,24 +57,20 @@ export async function handleContribute(req, res, next) {
     // 6. Amount comes from the obligation, NEVER from the request body
     const amountKobo = obligation.amountKobo;
 
-    // 7. Check for an existing initialized payment for this obligation
-    //    (prevents double-initialization if user hits the button twice)
+    // 7. Check for an existing initialized payment for this obligation.
+    //    If one exists it means the user previously opened Paystack checkout
+    //    but didn't complete (cancelled, closed the tab, etc.).
+    //    We MUST NOT reuse the same reference — Paystack rejects re-initialization
+    //    of an already-seen reference with "Duplicate Transaction Reference" (HTTP 400).
+    //    Instead: mark the stale payment as 'abandoned' and fall through to create
+    //    a fresh reference below, which Paystack will accept.
     const existing = await Payment.findOne({ obligation: obligation._id, status: 'initialized' }).lean();
     if (existing) {
-      // Re-initialize with Paystack to get a fresh URL (reference stays the same)
-      const user = await User.findById(userId).lean();
-      const psResult = await paystackService.initializeTransaction({
-        email:       user.email,
-        amountKobo,
-        reference:   existing.reference,
-        callbackUrl: `${env.CLIENT_URL}/payments/callback`,
-        metadata: {
-          obligationId: obligation._id,
-          circleId,
-          userId,
-        },
-      });
-      return res.json({ data: { authorizationUrl: psResult.authorizationUrl, reference: existing.reference } });
+      await Payment.updateOne(
+        { _id: existing._id },
+        { $set: { status: 'abandoned' } }
+      );
+      // Fall through to steps 8–10 to create a new reference and Payment record.
     }
 
     // 8. Generate unique reference: AJT_<obligationId>_<8 random chars>

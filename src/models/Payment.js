@@ -42,7 +42,7 @@ const paymentSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ['initialized', 'success', 'failed'],
+      enum: ['initialized', 'success', 'failed', 'abandoned'],
       default: 'initialized',
     },
     settledAt: {
