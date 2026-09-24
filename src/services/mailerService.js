@@ -3,6 +3,8 @@
  *
  * MAIL_TRANSPORT=console  → logs subject + recipient only (no body — no secrets in logs).
  * MAIL_TRANSPORT=smtp     → sends via nodemailer; secure:true on port 465, STARTTLS otherwise.
+ * MAIL_TRANSPORT=brevo    → sends via Brevo's HTTPS transactional email API (POST /v3/smtp/email).
+ *                           Use this when outbound SMTP ports are blocked (e.g. Render free tier).
  *
  * sendMail({ to, subject, text, html }) — never throws into callers.
  *   Returns { status: 'sent'|'failed'|'skipped', messageId? }.
@@ -152,6 +154,48 @@ export async function sendMail({ to, subject, text, html }) {
   if (env.MAIL_TRANSPORT === 'console') {
     console.log(`[mailer:console] To: ${to} | Subject: ${subject}`);
     return { status: 'sent', messageId: 'console' };
+  }
+
+  // Brevo HTTPS transactional email API
+  if (env.MAIL_TRANSPORT === 'brevo') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': env.BREVO_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender:      { name: brand.name, email: env.MAIL_FROM },
+          to:          [{ email: to }],
+          subject,
+          htmlContent: html,
+          textContent: text,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        let errBody = '<unreadable>';
+        try { errBody = await response.text(); } catch { /* ignore */ }
+        // Log status and error body — never the API key
+        console.error(
+          `[mailer:brevo] Failed — to: ${to} | subject: ${subject} | HTTP ${response.status} | body: ${errBody}`
+        );
+        return { status: 'failed' };
+      }
+
+      const data = await response.json();
+      return { status: 'sent', messageId: data.messageId };
+    } catch (err) {
+      clearTimeout(timer);
+      const msg = err.name === 'AbortError' ? 'Brevo request timed out' : err.message;
+      console.error(`[mailer:brevo] Failed — to: ${to} | subject: ${subject} | error: ${msg}`);
+      return { status: 'failed' };
+    }
   }
 
   // SMTP path (nodemailer)

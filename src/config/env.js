@@ -16,11 +16,12 @@ const envSchema = z.object({
   CLIENT_URL: z.string().url('CLIENT_URL must be a valid URL'),
   PAYSTACK_SECRET_KEY: z.string().startsWith('sk_', 'PAYSTACK_SECRET_KEY must start with sk_'),
   PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
-  MAIL_TRANSPORT: z.enum(['smtp', 'console']).default('console'),
+  MAIL_TRANSPORT: z.enum(['smtp', 'console', 'brevo']).default('console'),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  BREVO_API_KEY: z.string().optional(),
   MAIL_FROM: z.string().email('MAIL_FROM must be a valid email').default('noreply@ajoledger.example.com'),
   REMINDER_DAYS_BEFORE: z.coerce.number().int().nonnegative().default(2),
   ENABLE_CRON: z.enum(['true', 'false']).transform((v) => v === 'true').default('false'),
@@ -28,13 +29,16 @@ const envSchema = z.object({
   DEMO_MODE: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
 });
 
-// Refine: if MAIL_TRANSPORT=smtp, SMTP fields are required
+// Refine: transport-specific required fields
 const refinedSchema = envSchema.superRefine((data, ctx) => {
   if (data.MAIL_TRANSPORT === 'smtp') {
     if (!data.SMTP_HOST) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SMTP_HOST is required when MAIL_TRANSPORT=smtp', path: ['SMTP_HOST'] });
     if (!data.SMTP_PORT) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SMTP_PORT is required when MAIL_TRANSPORT=smtp', path: ['SMTP_PORT'] });
     if (!data.SMTP_USER) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SMTP_USER is required when MAIL_TRANSPORT=smtp', path: ['SMTP_USER'] });
     if (!data.SMTP_PASS) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SMTP_PASS is required when MAIL_TRANSPORT=smtp', path: ['SMTP_PASS'] });
+  }
+  if (data.MAIL_TRANSPORT === 'brevo') {
+    if (!data.BREVO_API_KEY) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BREVO_API_KEY is required when MAIL_TRANSPORT=brevo', path: ['BREVO_API_KEY'] });
   }
 });
 
