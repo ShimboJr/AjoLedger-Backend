@@ -110,8 +110,12 @@ function formatNaira(kobo) {
  * @returns {Promise<{ notificationsCreated: number, emailsSent: number }>}
  */
 export async function runReminders({ circleId } = {}) {
+  // When targeting a specific circle, also match 'completed' — the engine
+  // transitions the circle to 'completed' when the last cycle closes, which
+  // happens BEFORE runReminders is called.  Without this, the final cycle's
+  // emails (payout_sent, payment_missed, circle_completed) are never sent.
   const circleQuery = circleId
-    ? { _id: circleId, status: 'active' }
+    ? { _id: circleId, status: { $in: ['active', 'completed'] } }
     : { status: 'active' };
 
   const circles = await Circle.find(circleQuery).lean();
@@ -123,77 +127,85 @@ export async function runReminders({ circleId } = {}) {
     const now = circleNow(circle);
 
     const openCycle = await Cycle.findOne({ circle: circle._id, status: 'open' }).lean();
-    if (!openCycle) continue;
 
     // ── Part 1: Pending obligation reminders ─────────────────────────────────
+    // Only runs when there is an open cycle.  When the circle is 'completed'
+    // (last cycle just closed) there are no pending obligations to remind about.
 
-    const obligations = await Obligation.find({
-      cycle:  openCycle._id,
-      status: 'pending',
-    }).lean();
+    if (openCycle) {
+      const obligations = await Obligation.find({
+        cycle:  openCycle._id,
+        status: 'pending',
+      }).lean();
 
-    for (const ob of obligations) {
-      const kinds = classifyReminders(
-        now,
-        openCycle.dueDate,
-        openCycle.closesAt,
-        env.REMINDER_DAYS_BEFORE
-      );
-
-      if (kinds.length === 0) continue;
-
-      const user = await User.findById(ob.user).lean();
-      if (!user) continue;
-
-      const amountNaira = formatNaira(ob.amountKobo);
-
-      for (const kind of kinds) {
-        const copyFn = REMINDER_COPY[kind];
-        if (!copyFn) continue;
-
-        const { title, body } = copyFn(amountNaira, circle.name, env.REMINDER_DAYS_BEFORE);
-        const dedupeKey = `rem:${kind}:${ob._id}`;
-
-        // Create in-app notification (deduped by unique index on dedupeKey)
-        const notification = await tryCreateNotification({
-          user:        ob.user,
-          circle:      circle._id,
-          kind:        'reminder',
-          title,
-          body,
-          dedupeKey,
-          emailStatus: 'skipped', // Will update after email attempt
-        });
-
-        if (!notification) continue; // Already sent — skip email too
-        notificationsCreated++;
-
-        // Send email
-        const result = await sendCircleMail({
-          to:         user.email,
-          subject:    title,
-          title,
-          body,
-          circleName: circle.name,
-          amountKobo: ob.amountKobo,
-          dueDate:    openCycle.dueDate,
-          circleId:   circle._id,
-        });
-
-        await Notification.updateOne(
-          { _id: notification._id },
-          { $set: { emailStatus: result.status } }
+      for (const ob of obligations) {
+        const kinds = classifyReminders(
+          now,
+          openCycle.dueDate,
+          openCycle.closesAt,
+          env.REMINDER_DAYS_BEFORE
         );
 
-        if (result.status === 'sent') emailsSent++;
+        if (kinds.length === 0) continue;
+
+        const user = await User.findById(ob.user).lean();
+        if (!user) continue;
+
+        const amountNaira = formatNaira(ob.amountKobo);
+
+        for (const kind of kinds) {
+          const copyFn = REMINDER_COPY[kind];
+          if (!copyFn) continue;
+
+          const { title, body } = copyFn(amountNaira, circle.name, env.REMINDER_DAYS_BEFORE);
+          const dedupeKey = `rem:${kind}:${ob._id}`;
+
+          // Create in-app notification (deduped by unique index on dedupeKey)
+          const notification = await tryCreateNotification({
+            user:        ob.user,
+            circle:      circle._id,
+            kind:        'reminder',
+            title,
+            body,
+            dedupeKey,
+            emailStatus: 'skipped', // Will update after email attempt
+          });
+
+          if (!notification) continue; // Already sent — skip email too
+          notificationsCreated++;
+
+          // Send email
+          const result = await sendCircleMail({
+            to:         user.email,
+            subject:    title,
+            title,
+            body,
+            circleName: circle.name,
+            amountKobo: ob.amountKobo,
+            dueDate:    openCycle.dueDate,
+            circleId:   circle._id,
+          });
+
+          await Notification.updateOne(
+            { _id: notification._id },
+            { $set: { emailStatus: result.status } }
+          );
+
+          if (result.status === 'sent') emailsSent++;
+        }
       }
     }
 
     // ── Part 2: Send emails for undelivered engine notifications ──────────────
+    // Runs regardless of whether there is an open cycle so that notifications
+    // created for the final cycle (payment_missed, payout_sent, circle_completed)
+    // are emailed even after the circle has transitioned to 'completed'.
 
     const pendingEngineNotifs = await Notification.find({
       circle:      circle._id,
-      kind:        { $in: ['payment_missed', 'payout_sent'] },
+      // Include circle_completed — engine creates these for every member when
+      // the last cycle closes, but they were never in this pickup list.
+      kind:        { $in: ['payment_missed', 'payout_sent', 'circle_completed'] },
       emailStatus: 'skipped',
     }).lean();
 
