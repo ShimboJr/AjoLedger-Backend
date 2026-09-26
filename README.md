@@ -1,104 +1,241 @@
-# AjoLedger — Backend
+# AjoLedger Backend
 
-> **Sandbox mode: no real money moves.** All payments run through Paystack **test mode**; all payouts are simulated ledger entries.
+> **Save together. Provably.**
 
-The API server for **AjoLedger** — a tamper-evident rotating savings circle (ajo / esusu / susu) platform. It replaces WhatsApp screenshots and notebooks with a shared, append-only ledger every member can verify, and turns saving discipline into a portable, shareable **Reliability Score**.
+AjoLedger is a REST API for rotating savings circles (ajo/esusu/susu). It provides authentication, circle management, contribution obligations, Paystack payment verification, an append-only tamper-evident ledger, notifications, scheduled cycle processing, CSV exports, and shareable Reliability/Trust Profiles.
 
-🔗 **Live API:** `https://ajoledger-backend-73kr.onrender.com/api`
-🔗 **Live app:** [https://sjr-ajoledger.vercel.app/](https://sjr-ajoledger.vercel.app/)
-🔗 **Frontend repo:** [ShimboJr/AjoLedger-Frontend](https://github.com/ShimboJr/AjoLedger-Frontend)
-📄 **Full API reference:** [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
+> **Sandbox / demo notice:** The application is designed for demonstration and sandbox workflows. The public Trust Profile explicitly states that scores are computed from sandbox data and that no real money is moved.
 
----
+## Live Resources
 
-## Screenshots
+| Resource | Link |
+|---|---|
+| Backend repository | https://github.com/ShimboJr/AjoLedger-Backend |
+| Frontend repository | https://github.com/ShimboJr/AjoLedger-Frontend |
+| Live application | https://sjr-ajoledger.vercel.app |
+| Production API | https://ajoledger-backend-73kr.onrender.com |
+| API health check | https://ajoledger-backend-73kr.onrender.com/api/health |
 
-### Health Check
+## What the Backend Does
 
-![Health check](docs/screenshots/health-check.png)
-
-### Login
-
-![Login](docs/screenshots/login.png) 
-
-### Circles List
-
-![Circles List](docs/screenshots/circles.png)
-
-### Ledger Verify
-
-![Ledger verify](docs/screenshots/ledger-verify.png)
-
----
-
-## What it does
-
-- Members join a **circle** and contribute a fixed amount each cycle; one member is paid out per cycle, on a rotating schedule.
-- Every contribution, missed payment, and payout is recorded as an entry in a **hash-chained, append-only ledger** — tampering is mathematically detectable, not just discouraged by convention.
-- Every member gets a **Reliability Score**, computed from their on-time/late/missed history, with an optional public, shareable profile link.
-- A **cycle engine** automatically closes overdue cycles, marks missed payments, records payouts, and opens the next cycle — driven by real time in production, or fast-forwarded on demand via demo controls.
-
-## Features
-
-- JWT authentication (register, login, `/me`)
-- Circle lifecycle: create → invite link → join → reorder payout positions → start → auto-progressing cycles → completed
-- Real Paystack **test-mode** payments with signature-verified webhooks and idempotent settlement (safe under concurrent webhook + callback calls)
-- Append-only, SHA-256 hash-chained ledger with a `/verify` endpoint that detects tampering
-- CSV ledger export (Excel-safe, formula-injection-protected)
-- Automatic cycle closing + missed-payment detection + payout recording
-- Reliability Score with tiers (`building` → `poor` → `fair` → `good` → `excellent`) and a public, privacy-preserving shareable profile
-- Email reminders (due soon / due today / overdue) via a pluggable mail transport — see [Email delivery](#email-delivery) below
+- JWT authentication with registration, login, and current-user lookup
+- Rotating savings circle creation and membership
+- Invite-code based joining
+- Organizer-controlled payout order
+- Circle lifecycle: `forming → active → completed`
+- Automatic cycle and contribution-obligation creation
+- Paystack checkout initialization and server-side verification
+- Paystack HMAC-SHA512 webhook verification
+- Transactional payment settlement
+- Append-only, hash-chained ledger
+- Ledger verification and CSV export
+- Reliability/Trust Score computation
+- Optional public Trust Profiles
 - In-app notifications
-- Demo-mode "simulate" controls to fast-forward a circle's clock for live demos, without waiting real days/weeks
-- An external-cron-friendly `/jobs/run` endpoint, for hosts that don't keep a process alive 24/7
+- Email reminders through console, SMTP, or Brevo
+- Scheduled engine/reminder processing
+- Protected external cron endpoint
+- Demo time simulation for presentations
+- Request validation, rate limiting, Helmet, CORS, and centralized errors
+- Automated tests with Vitest, Supertest, and MongoDB Memory Server
 
-## Tech stack
+---
+
+## Architecture
+
+```text
+                         ┌─────────────────────────┐
+                         │   AjoLedger React Client │
+                         │         Vercel           │
+                         └────────────┬────────────┘
+                                      │ HTTPS / JSON
+                                      ▼
+                         ┌─────────────────────────┐
+                         │   AjoLedger REST API    │
+                         │   Express / Node 20     │
+                         │         Render          │
+                         └──────┬────────┬─────────┘
+                                │        │
+                 ┌──────────────┘        └─────────────────┐
+                 ▼                                          ▼
+        ┌─────────────────┐                        ┌────────────────┐
+        │ MongoDB / Atlas │                        │    Paystack    │
+        │ Users / Circles │                        │ Checkout +     │
+        │ Cycles / Ledger │                        │ Verification   │
+        └─────────────────┘                        └────────────────┘
+                 │
+                 ▼
+        ┌─────────────────┐
+        │ Engine / Cron   │
+        │ Reminders /     │
+        │ Notifications   │
+        └─────────────────┘
+```
+
+---
+
+## Core Flow
+
+```text
+Register / Login
+      │
+      ▼
+Create Circle ──► Invite Members
+      │
+      ▼
+Set Payout Order
+      │
+      ▼
+Start Circle
+      │
+      ▼
+Cycles + Obligations
+      │
+      ▼
+Paystack Contribution
+      │
+      ▼
+Server Verification
+      │
+      ├──► Obligation updated
+      ├──► Cycle pot updated
+      └──► Ledger entry appended
+      │
+      ▼
+Engine advances cycles
+      │
+      ├──► Missed payments
+      ├──► Payout events
+      └──► Completion
+      │
+      ▼
+Reliability / Trust Profile
+```
+
+---
+
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
-| Runtime | Node.js 20+, Express 4 |
-| Database | MongoDB Atlas, Mongoose 8 |
-| Auth | JWT (jsonwebtoken), bcryptjs |
+| Runtime | Node.js 20+ |
+| Framework | Express 4 |
+| Database | MongoDB / MongoDB Atlas |
+| ODM | Mongoose 8 |
+| Authentication | JWT |
+| Password hashing | bcryptjs |
 | Validation | Zod |
-| Payments | Paystack REST API (test mode) |
-| Email | Nodemailer (SMTP) or Brevo HTTP API, or console-logged in dev |
-| Scheduling | node-cron (in-process) + `/jobs/run` (external-pinger-friendly) |
-| Security | Helmet, CORS allowlist, express-rate-limit, timing-safe secret comparisons |
-| Testing | Vitest, Supertest, mongodb-memory-server |
+| Payments | Paystack |
+| Email | Nodemailer / Brevo |
+| Scheduling | node-cron |
+| Security | Helmet, CORS, express-rate-limit |
+| Testing | Vitest, Supertest, MongoDB Memory Server |
 | Hosting | Render |
 
-## Architecture notes
+---
 
-- **Money is always an integer in kobo** — never floats, never naira — throughout the database and service layer, to avoid rounding drift.
-- **Domain time never calls `new Date()` directly.** Every time-sensitive operation reads `circleNow(circle)`, which returns `circle.simulatedNow` when set (demo mode) or the real time otherwise — so the entire engine, reminders, and payment late/on-time classification stay consistent whether running for real or fast-forwarded for a demo.
-- **The ledger is append-only at the database layer**, not just by convention — Mongoose middleware throws on any `update`/`delete` operation against a `LedgerEntry`, and each entry's hash chains to the previous one.
-- **Payment settlement is idempotent.** The Paystack webhook and the browser's callback-verification endpoint both call the same `settlePayment(reference)` function, so a payment is only ever applied once even if both fire for the same transaction.
+## API Documentation
 
-## Getting started
+The full endpoint reference is available in:
 
-### Prerequisites
-- Node.js ≥ 20
-- A MongoDB Atlas cluster (free tier is fine)
-- A Paystack account (test/sandbox keys — no business verification needed for test mode)
-
-### Setup
-
-```bash
-git clone https://github.com/ShimboJr/AjoLedger-Backend.git
-cd AjoLedger-Backend
-cp .env.example .env    # fill in the values — see table below
-npm install
-npm run dev              # starts on the PORT set in .env (1929 by default)
+```text
+API_DOCUMENTATION.md
 ```
 
-Visit `http://localhost:1929/api/health` — you should see `{ "data": { "status": "ok", "db": "connected", ... } }`.
+It covers:
 
-### Seed demo data (optional)
+- Authentication
+- Circle management
+- Ledger operations
+- Payments
+- Notifications
+- Trust Profiles
+- Public Trust Profiles
+- Demo simulation
+- Scheduled jobs
+- Paystack webhooks
+- Error formats
+- Security behavior
+- Environment configuration
 
-```bash
-npm run seed         # populates demo users, circles, and ledger history
-npm run seed:reset    # wipes and rebuilds it
+### API Base URL
+
+Production:
+
+```text
+https://ajoledger-backend-73kr.onrender.com/api
 ```
+
+Local example:
+
+```text
+http://localhost:1929/api
+```
+
+---
+
+## API Highlights
+
+### Authentication
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+```
+
+Protected requests use:
+
+```http
+Authorization: Bearer <JWT>
+```
+
+### Circles
+
+```http
+POST   /api/circles
+GET    /api/circles
+GET    /api/circles/join/:code
+POST   /api/circles/join/:code
+GET    /api/circles/:id
+PATCH  /api/circles/:id/payout-order
+POST   /api/circles/:id/start
+DELETE /api/circles/:id/members/:userId
+```
+
+### Ledger
+
+```http
+GET /api/circles/:id/ledger
+GET /api/circles/:id/ledger/verify
+GET /api/circles/:id/ledger.csv
+```
+
+### Payments
+
+```http
+POST /api/circles/:id/contribute
+GET  /api/payments/verify/:reference
+POST /api/webhooks/paystack
+```
+
+### Trust
+
+```http
+GET   /api/me/trust
+PATCH /api/me/trust
+GET   /api/public/trust/:slug
+```
+
+### Notifications
+
+```http
+GET   /api/notifications
+PATCH /api/notifications/:id/read
+POST  /api/notifications/read-all
+```
+
+---
 
 ## Environment variables
 
@@ -121,6 +258,8 @@ npm run seed:reset    # wipes and rebuilds it
 | `CRON_SECRET` | ✅ | ≥ 32 characters — required regardless of `ENABLE_CRON` |
 | `DEMO_MODE` | — | `true`/`false`, default `true` — gates the `/circles/:id/simulate` endpoint |
 
+---
+
 ## Email delivery
 
 **Render's free tier blocks outbound SMTP ports** (25, 465, 587), so `MAIL_TRANSPORT=smtp` will time out once deployed there, even though it works locally. Two working alternatives, both over plain HTTPS:
@@ -128,69 +267,433 @@ npm run seed:reset    # wipes and rebuilds it
 - **`console`** (default) — logs emails instead of sending them. Zero setup, always works.
 - **`brevo`** — sends via Brevo's HTTPS transactional email API. Only needs a single **verified sender email** (no domain/DNS ownership required) — see [brevo.com](https://www.brevo.com). Free tier: 300 emails/day.
 
-## Available scripts
+---
 
-| Script | What it does |
+## Ledger Design
+
+The ledger is designed to be append-only and tamper-evident.
+
+Each entry contains:
+
+- `seq`
+- `cycleNumber`
+- `user`
+- `type`
+- `amountKobo`
+- `reference`
+- `prevHash`
+- `hash`
+- `meta`
+- `sandbox`
+
+The Mongoose schema blocks mutation operations on existing ledger records.
+
+Members can request a chain verification:
+
+```http
+GET /api/circles/:id/ledger/verify
+```
+
+The ledger can also be exported:
+
+```http
+GET /api/circles/:id/ledger.csv
+```
+
+---
+
+## Payment Security
+
+The contribution amount is never accepted from the browser.
+
+Instead:
+
+1. The API finds the member's current pending obligation.
+2. The amount is read from that obligation.
+3. A unique internal Paystack reference is generated.
+4. The payment record is stored.
+5. Paystack checkout is initialized.
+6. After payment, Paystack is verified server-side.
+7. Status, currency, amount, and reference are checked.
+8. Settlement updates the obligation, cycle pot, and ledger transactionally.
+
+Paystack webhooks are verified using HMAC-SHA512.
+
+---
+
+## Reliability / Trust Profiles
+
+The Trust system aggregates resolved obligations:
+
+- `paid_on_time` = 1
+- `paid_late` = 0.5
+- `missed` = 0
+
+A score is only calculated after at least three resolved obligations.
+
+Users can:
+
+- view their private trust profile,
+- publish it,
+- regenerate its public slug,
+- share a public URL.
+
+Public responses intentionally exclude sensitive fields such as email and individual payment amounts.
+
+---
+
+## Scheduled Processing
+
+The backend contains an engine for:
+
+- opening/advancing cycles,
+- identifying missed obligations,
+- generating payout/completion events,
+- creating notifications.
+
+The reminder service handles:
+
+- due-soon reminders,
+- due-today reminders,
+- overdue reminders,
+- email delivery,
+- engine notification emails.
+
+### Built-in scheduler
+
+```env
+ENABLE_CRON=true
+```
+
+Runs every 15 minutes.
+
+### External scheduler
+
+```http
+POST /api/jobs/run
+x-cron-secret: <CRON_SECRET>
+```
+
+This is useful for hosts that may sleep between requests.
+
+---
+
+## Demo Mode
+
+The API includes an organizer-only time simulation endpoint:
+
+```http
+POST /api/circles/:id/simulate
+```
+
+Request:
+
+```json
+{
+  "action": "pass-due-date"
+}
+```
+
+or:
+
+```json
+{
+  "action": "close-cycle"
+}
+```
+
+It is enabled only when:
+
+```env
+DEMO_MODE=true
+```
+
+This makes it possible to demonstrate overdue reminders and cycle closure without waiting for real dates.
+
+---
+
+## Security Controls
+
+- JWT authentication
+- bcrypt password hashing
+- Zod input validation
+- Helmet security headers
+- CORS restrictions
+- Authentication rate limiting
+- Public trust rate limiting
+- Timing-safe cron-secret comparison
+- HMAC-SHA512 Paystack webhook verification
+- Server-side payment amount enforcement
+- Payment ownership checks
+- Transactional payment settlement
+- Idempotent payment settlement
+- Append-only ledger enforcement
+- Sanitized user responses
+- Public trust field allow-list
+- Production-safe error responses
+- Sensitive query parameter masking in request logs
+
+---
+
+## Environment Variables
+
+Create `.env` from `.env.example`.
+
+```env
+NODE_ENV=development
+PORT=1929
+
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/ajoledger?retryWrites=true&w=majority
+
+JWT_SECRET=change-me-to-a-long-random-secret
+JWT_EXPIRES_IN=7d
+
+CLIENT_URL=http://localhost:5173
+
+PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+PAYSTACK_BASE_URL=https://api.paystack.co
+
+MAIL_TRANSPORT=console
+
+BREVO_API_KEY=
+
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+
+MAIL_FROM=noreply@ajoledger.example.com
+
+REMINDER_DAYS_BEFORE=2
+ENABLE_CRON=false
+CRON_SECRET=change-me-to-another-long-random-secret
+DEMO_MODE=true
+```
+
+### Production
+
+At minimum, configure:
+
+```text
+MONGODB_URI
+JWT_SECRET
+CLIENT_URL
+PAYSTACK_SECRET_KEY
+CRON_SECRET
+```
+
+Use long random secrets for `JWT_SECRET` and `CRON_SECRET`.
+
+---
+
+## Installation
+
+### Requirements
+
+- Node.js 20+
+- MongoDB / MongoDB Atlas
+- Paystack test account/secret key for payment testing
+
+### Setup
+
+```bash
+git clone https://github.com/ShimboJr/AjoLedger-Backend.git
+cd AjoLedger-Backend
+
+npm install
+
+cp .env.example .env
+```
+
+Fill in `.env`, then:
+
+```bash
+npm run dev
+```
+
+---
+
+## NPM Scripts
+
+| Command | Purpose |
 |---|---|
-| `npm run dev` | Start with hot-reload (`node --watch`) |
-| `npm start` | Start in production mode |
-| `npm test` | Run the Vitest suite once |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run seed` | Populate demo data |
-| `npm run seed:reset` | Wipe and re-populate demo data |
+| `npm run dev` | Start development server with Node watch mode |
+| `npm start` | Start production server |
+| `npm test` | Run Vitest test suite |
+| `npm run test:watch` | Run Vitest in watch mode |
+| `npm run seed` | Seed sandbox/demo data |
+| `npm run seed:reset` | Reset/reseed sandbox/demo data |
+
+---
 
 ## Testing
+
+Run:
 
 ```bash
 npm test
 ```
 
-Uses `mongodb-memory-server` for isolated test runs — no external database needed. Covers auth, circle lifecycle, payments/settlement idempotency, the ledger hash chain (including a deliberate tamper test), CSV escaping, the cycle engine, dates, and the mailer.
+The test suite covers areas including:
 
-## Deployment (Render)
+- authentication
+- circles
+- payments
+- ledger
+- public trust profiles
+- engine behavior
+- CSV export
+- dates
+- mailer behavior
 
-1. Create a new **Web Service** on Render, pointed at this repo.
-2. **Root Directory** must be set explicitly if this backend lives in a subfolder of a monorepo — otherwise leave blank for a standalone repo.
-3. **Build Command:** `npm install`
-4. **Start Command:** `npm start`
-5. Add every variable from the table above under **Environment**.
-6. Set `CLIENT_URL` to your deployed frontend's exact URL (no trailing slash) — CORS depends on an exact match.
-7. In your Paystack dashboard, set the **test-mode webhook URL** to `https://<your-render-url>/api/webhooks/paystack`.
-8. Because Render's free tier can spin down when idle, consider pointing an external pinger (e.g. cron-job.org) at `POST /api/jobs/run` (with the `x-cron-secret` header) every 10–15 minutes to keep cycle-closing and reminders running reliably — this works alongside or instead of the in-process `ENABLE_CRON` scheduler.
+The test environment uses MongoDB Memory Server, allowing database-dependent tests without requiring the production database.
 
-## Project structure
+---
 
+## Deployment
+
+The production API is deployed on Render:
+
+```text
+https://ajoledger-backend-73kr.onrender.com
 ```
+
+The frontend is deployed separately on Vercel:
+
+```text
+https://sjr-ajoledger.vercel.app
+```
+
+For production, set:
+
+```env
+NODE_ENV=production
+CLIENT_URL=https://sjr-ajoledger.vercel.app
+```
+
+Then configure the MongoDB, Paystack, mail, and cron secrets in the hosting provider.
+
+---
+
+## Project Structure
+
+```text
 src/
-  app.js                 Express app: middleware, route mounting, error handler
-  server.js               Boot: connects the DB, starts the scheduler, starts listening
-  config/                 env validation (zod), DB connection, brand constants
-  controllers/            Thin HTTP handlers — one per resource
-  services/                Business logic: auth, circles, payments, ledger, engine,
-                            reminders, trust, csv, mailer, paystack client
-  models/                 Mongoose schemas: User, Circle, Membership, Cycle,
-                            Obligation, Payment, LedgerEntry, Notification
-  routes/                 Route → controller wiring
-  middleware/             auth (JWT), validation (zod), rate limiting, error handler
-  jobs/                   node-cron scheduler
-  scripts/                seed.js
-  utils/                  dates, money, hashing, ID generation
-tests/                    Vitest test suites
+├── app.js
+├── server.js
+├── config/
+│   ├── brand.js
+│   ├── db.js
+│   └── env.js
+├── controllers/
+│   ├── authController.js
+│   ├── circleController.js
+│   ├── ledgerController.js
+│   ├── paymentController.js
+│   └── webhookController.js
+├── jobs/
+│   └── scheduler.js
+├── middleware/
+│   ├── auth.js
+│   ├── error.js
+│   ├── rateLimit.js
+│   └── validate.js
+├── models/
+│   ├── Circle.js
+│   ├── Cycle.js
+│   ├── LedgerEntry.js
+│   ├── Membership.js
+│   ├── Notification.js
+│   ├── Obligation.js
+│   ├── Payment.js
+│   └── User.js
+├── routes/
+│   ├── auth.js
+│   ├── circles.js
+│   ├── health.js
+│   ├── jobs.js
+│   ├── me.js
+│   ├── notifications.js
+│   ├── payments.js
+│   ├── public.js
+│   └── webhook.js
+├── scripts/
+│   └── seed.js
+├── services/
+│   ├── authService.js
+│   ├── circleService.js
+│   ├── cycleService.js
+│   ├── csv.js
+│   ├── engine.js
+│   ├── ledger.js
+│   ├── mailerService.js
+│   ├── payments.js
+│   ├── paystackService.js
+│   ├── reminders.js
+│   └── trust.js
+└── utils/
+    ├── dates.js
+    ├── hash.js
+    ├── ids.js
+    └── money.js
+
+tests/
+├── auth.test.js
+├── circles.test.js
+├── csv.test.js
+├── dates.test.js
+├── engine.test.js
+├── ledger.test.js
+├── mailer.test.js
+├── payments.test.js
+└── public.test.js
 ```
 
-## Security notes
+---
 
-- Passwords hashed with bcrypt (cost 10); password hashes are never returned by any endpoint.
-- JWT-based auth; no session state server-side.
-- Login responses are deliberately generic (don't reveal whether an email exists) and timing-safe (a dummy bcrypt comparison runs even for unknown emails).
-- Paystack webhook signatures verified with HMAC-SHA512 and a timing-safe comparison; the cron secret is compared the same way.
-- Payment amounts are **always** read from the server-side obligation record, never trusted from the request body.
-- Helmet security headers, a CORS allowlist scoped to `CLIENT_URL` (with `/api/public/*` open, since those links are meant to be shared externally), and a 100kb JSON body limit.
-- Ledger entries are immutable at the schema level, not just by application convention.
+## Screenshots / API Demonstration
 
-## Roadmap / limitations
+### API Health Check
 
-This is a hackathon build. Real money movement would require, at minimum: business registration, a licensed payment partner relationship for holding/transferring funds (a pure payment-facilitator role does not license custody of pooled funds under most regulatory frameworks), KYC/AML on every member, and a reserve/dispute-handling policy for missed payments and chargebacks. None of that is implemented — this repository is a sandbox demonstrating the trust/ledger/scoring mechanics only.
+![API Health check](docs/screenshots/health-check.png)
+
+### Login
+
+![Login](docs/screenshots/login.png) 
+
+### Circles List
+
+![Circles List](docs/screenshots/circles.png)
+
+### Circle / Ledger Flow
+
+![Circle Detail](docs/screenshots/circle-detail.png)
+
+### Ledger Verification
+
+![Ledger verify](docs/screenshots/ledger-verification.png)
+
+### Payment Verification
+
+![Payment verify](docs/screenshots/payment-verification.png)
+
+### Public Trust Profile
+
+![Public Trust](docs/screenshots/public-trust.png)
+
+---
+
+## Frontend
+
+The companion React application is available at:
+
+https://github.com/ShimboJr/AjoLedger-Frontend
+
+Live:
+
+https://sjr-ajoledger.vercel.app
+
+---
 
 ## License
 
